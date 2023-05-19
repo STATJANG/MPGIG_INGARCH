@@ -1,7 +1,8 @@
 ####REAL DATA ANALYSIS####
 ##Data Extraction
+load("MPGIG_INGARCH_FN (git).R")
 datt = read.csv("Cannabis_example.csv")
-datt = datt[,-1]
+datt = as.matrix(datt[,-1])
 
 ts.plot(datt,col=1:2)
 acf(datt)
@@ -9,7 +10,7 @@ pacf(datt)
 
 ####Implementation of EM algorithm
 #old_INGARCH_EM(dat = data,init=initial value if you have, model=list(past_mean=,past_obs=),trace=T,method="BFGS")
-em.1.1.old = old_INGARCH_EM(dat = datt,init=NULL,model=list(past_mean=c(1),past_obs=c(1)),trace=T,method="BFGS")
+em.1.1.old = old_INGARCH_EM(datt,init=NULL,model=list(past_mean=c(1),past_obs=c(1)),trace=T,method="BFGS")
 em.1.1.12.old = old_INGARCH_EM(datt,init=NULL,model=list(past_mean=c(1),past_obs=c(1,12)),trace=T,method="BFGS")
 em.1.12.1.12.old = old_INGARCH_EM(datt,init=NULL,model=list(past_mean=c(1,12),past_obs=c(1,12)),trace=T,method="BFGS")
 em.1.12.old = old_INGARCH_EM(datt,init=NULL,model=list(past_mean=NULL,past_obs=c(1,12)),trace=T,method="BFGS")
