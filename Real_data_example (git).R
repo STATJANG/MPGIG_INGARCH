@@ -40,23 +40,6 @@ abline(h=1,lwd=2,lty=2,col="blue")
 par(mfrow=c(1,1))
 
 
-tmp.poi = Poi_u(datt,em.1.12.poi,1)
-tmp.poi2 = Poi_u(datt,em.1.12.poi,2)
-pit_poi_1 = pit_mar(c(1:J)/J,tmp.poi)
-pit_poi_1 = c(pit_poi_1[1],diff(pit_poi_1))*10
-pit_poi_2 = pit_mar(c(1:J)/J,tmp.poi2)
-pit_poi_2 = c(pit_poi_2[1],diff(pit_poi_2))*10
-par(mfrow=c(1,2))
-hist(rep(seq(0.05,0.95,by=0.1),round(pit_poi_1*1000)),breaks = 10,
-     main="Poisson (MNC)",freq=F,ylab="",xlab="",ylim=c(0,2.5))
-abline(h=1,lwd=2,lty=2,col="blue")
-hist(rep(seq(0.05,0.95,by=0.1),round(pit_poi_2*1000)),breaks = 10,
-     main="Poisson (GNC)",freq=F,ylab="",xlab="",ylim=c(0,2.5))
-abline(h=1,lwd=2,lty=2,col="blue")
-par(mfrow=c(1,1))
-
-
-
 
 ##Parametric Boostrap
 set.seed(1)
