@@ -1,7 +1,4 @@
 #Necessary libraries.
-library(Rcpp)
-library(RcppArmadillo)
-library(RcppEigen)
 library(GeneralizedHyperbolic)
 library(gamlss)
 library(tscount)
@@ -11,53 +8,50 @@ library(DistributionUtils)
 
 
 
-##Data generation with the parameterization mu=R(phi,alpha)
-sim_pgig_ingarch = function(n5,phi5,alpha5,d5,A5,B5,burns){#,seedv){
+
+
+
+##Data generation with the parameterization mu=1.
+old_mpgig_ingarch_sim = function(n=300,model,phi,alpha,d,B,A=NULL,burns=500){
   
   #set.seed(seedv)
-  
-  p5 = dim(A5)[1]
-  
-  nut = matrix(0,p5,n5+burns)
-  ytop = matrix(0,p5,n5+burns)
-  
-  # GIG(\phi,\alpha) replicates
+  p = dim(B)[1]
+  max.ab = max(model[["past_obs"]])
+  nu = matrix(0,ncol = p,nrow = n+burns)
+  dat = matrix(0,ncol = p,nrow = n+burns)
   gig_z=0
-  #gig_z = rgig(n5+burns, chi = phi5, psi = phi5, lambda = alpha5)
+  b.ratio=besselRatio(phi,alpha,1)
   
-  for( i in 1:(n5+burns) ){
+  if(is.null(A)==F){
+    for( i in 1:(n+burns) ){
+      
+      #gig_z[i] = gamlss.dist::rGIG(1,mu=1,sigma=1/sqrt(phi),nu=alpha)
+      #gig_z[i] = GIGrvg::rgig(1,chi=phi/b.ratio,psi=phi*b.ratio,lambda=alpha) #mu=1
+      gig_z[i] = GIGrvg::rgig(1,chi=phi,psi=phi,lambda=alpha) #mu=R(phi,alpha)
+      if(i<=max.ab) {
+        dat[i,] = rpois(p,exp(nu[i,])*gig_z[i])
+      }else{
+        nu[i,] = d + A%*%c(nu[i-model[["past_mean"]],]) + B%*%log(c(dat[i-model[["past_obs"]],])+1) 
+        dat[i,] = rpois(p,exp(nu[i,])*gig_z[i])
+      }
+    } # end loop over i
+  }else{
     
-    gig_z[i] = GeneralizedHyperbolic::rgig(1, chi = phi5, psi = phi5, lambda = alpha5)#rGIG(1,mu=1,sigma=1/phi5,nu=alpha5)
-    
-    
-    if(i==1) {
-      nut[,i] = d5
-      # yt[,i] = exp(nut[,i])*besselK(phi5,1+alpha5)/besselK(phi5,alpha5)
-      ytop[,i] = rpois(p5,exp(nut[,i])*gig_z[i])
-      #apply( matrix(exp(nut[,i]))*gig_z[i] , 1 , function(ll) rpois(1,ll)  )
+    for( i in 1:(n+burns) ){
+      #gig_z[i] = gamlss.dist::rGIG(1,mu=1,sigma=1/sqrt(phi),nu=alpha)
+      #gig_z[i] = GIGrvg::rgig(1,chi=phi/b.ratio,psi=phi*b.ratio,lambda=alpha) #mu=1
+      gig_z[i] = GIGrvg::rgig(1,chi=phi,psi=phi,lambda=alpha) #mu=R(phi,alpha)     
+      if(i<=max.ab) {
+        dat[i,] = rpois(p,exp(nu[i,])*gig_z[i])
+      }else{
+        nu[i,] = d +B%*%log(c(dat[i-model[["past_obs"]],])+1) 
+        dat[i,] = rpois(p,exp(nu[i,])*gig_z[i])
+      }
     }
     
-    
-    if(i>1) {
-      nut[,i] = d5 + A5%*%nut[,i-1] + B5%*%log( ytop[,i-1] + matrix(rep(1,p5))  )
-      ytop[,i] = rpois(p5,exp(nut[,i])*gig_z[i])
-      #apply( matrix(exp(nut[,i]))*gig_z[i] , 1 , function(ll) rpois(1,ll)  )
-    }
-    
-  } # end loop over i
-  
-  # Z ~ GIG(\phi,\alpha)
-  #gig_z = rgig(n5+burns, chi = phi5, psi = phi5, lambda = alpha5)
-  
-  #yt = poisson_gen(exp(nut),gig_z)
-  
-  #return( t( nut[,burns:(burns+n5-1)] ) )
-  #return( t( exp(nut[,burns:(burns+n5-1)]) )*besselK(phi5,1+alpha5)/besselK(phi5,alpha5) )
-  
-  return( t(ytop[,burns:(burns+n5-1)]) )
-  #return( t(ytop[,(burns+1):(burns+n5)]) )
-} # end function sim_pgig_ingarch
-
+  }
+  return( dat[-(1:burns),] )
+}
 
 
 # Approximation of Bessel in case it diverges due to a large argument(phi).
@@ -68,9 +62,60 @@ approx_logK=function(x,nu){
 
 
 
-
-
+#parameterizatino mu=R(phi,alpha)
 old_INGARCH_init = function(dat,model=list(past_mean=1,past_obs=1)){
+  
+  dat_n = dim(dat)[1] #the number of observation
+  dat_p = dim(dat)[2] #the dimension of multivariate time series; 
+  init = new_INGARCH_init(dat,model)
+  init_phi = init_alpha = rep(NA,dat_p) 
+  
+  if(is.null(model[["past_mean"]])==T){ #in'A'rch
+    
+    for(p in 1:dat_p){
+      tryCatch(
+        expr = {
+          init_GIG = gamlss(dat[(3:dat_n),p]~1+log(1+dat[2:(dat_n-1),p]),family="SICHEL",control=gamlss.control(trace=FALSE))
+          init_phi[p] = max(exp(-init_GIG$sigma.coefficients),0.1)
+          init_alpha[p] = init_GIG$nu.coefficients
+          
+        },
+        error = function(e){ 
+        }
+      )
+    }
+    tmp_est = c( median(init_phi,na.rm = T),median(init_alpha,na.rm = T) )
+    tmp_d = init$estimate[3:(3+dat_p)]/besselRatio(tmp_est[1],tmp_est[2],1)
+    #tmp_d = init$estimate[3:(3+dat_p)]/mean(GIGrvg::rgig(10000,tmp_est[1],tmp_est[1],lambda=tmp_est[2]))
+    tmp_est = c(tmp_est,tmp_d,init$estimate[-(1:(3+dat_p))])
+    z=list(estimate=tmp_est,fitted = init$fitted, residuals = init$resid)
+    class(z) = "ingarch_init"
+    return(z)
+  }else{
+    
+    for(p in 1:dat_p){
+      tryCatch(
+        expr = {
+          init_GIG = gamlss(dat[(3:dat_n),p]~1+log(1+dat[2:(dat_n-1),p]),family="SICHEL",control=gamlss.control(trace=FALSE))
+          init_phi[p] = max(exp(-init_GIG$sigma.coefficients),0.1)
+          init_alpha[p] = init_GIG$nu.coefficients
+        },
+        error = function(e){ 
+        }
+      )
+    }
+    tmp_est = c( median(init_phi,na.rm = T),median(init_alpha,na.rm = T) )
+    tmp_d = init$estimate[3:(3+dat_p)]/besselRatio(tmp_est[1],tmp_est[2],1)
+    tmp_est = c(tmp_est,tmp_d,init$estimate[-(1:(3+dat_p))])
+    z=list(estimate=tmp_est,fitted = init$fitted, residuals = init$resid)
+    class(z) = "ingarch_init"
+    return(z)
+  }
+}
+
+#Obtain initial values (mu=1 parameterization)
+new_INGARCH_init = function(dat,model=list(past_mean=1,past_obs=1),distr = "MSICHEL"){#'dat' here is the full data.
+  
   
   dat_n = dim(dat)[1] #the number of observation
   dat_p = dim(dat)[2] #the dimension of multivariate time series; 
@@ -81,8 +126,7 @@ old_INGARCH_init = function(dat,model=list(past_mean=1,past_obs=1)){
   init_d = rep(0,dat_p) 
   init_B = matrix(0,ncol=dat_p*bb ,nrow=dat_p)
   init_lam = init_resid=matrix(0,ncol=dat_p,nrow=dat_n)
-  disp =0
-  init_phi = init_alpha = rep(NA,dat_p) 
+  disp = 0
   
   if(is.null(model[["past_mean"]])==T){ #in'A'rch
     #num_par = 2+dat_p+ (aa+bb)*dat_p^2 # the number of parameters.
@@ -95,23 +139,11 @@ old_INGARCH_init = function(dat,model=list(past_mean=1,past_obs=1)){
       disp[p] = unname(init_val$sigmasq)
       init_lam[,p] = init_val$fitted.values
       init_resid[,p] = init_val$residuals
-      tryCatch(
-        expr = {
-          init_GIG = gamlss(dat[(3:dat_n),p]~1+log(1+dat[2:(dat_n-1),p]),family="SICHEL",control=gamlss.control(trace=FALSE))
-          init_phi[p] = max(exp(-init_GIG$sigma.coefficients),0.1)
-          init_alpha[p] = init_GIG$nu.coefficients
-        },
-        error = function(e){ 
-        }
-      )
     }
-    tmp_init_d = log( (-(1+disp)+sqrt((1+disp)^2+4*disp*exp(init_d)))/(2*disp) )
-    tmp_est = c( median(init_phi,na.rm = T),median(init_alpha,na.rm = T) )
-    tmp_est = c(tmp_est,
-                optim(tmp_init_d,function(pars){old_mSichel_f(c(tmp_est,pars,init_B),dat,model)},method="BFGS")$par,
-                init_B)
-    z=list(estimate=tmp_est,
+    z=list(estimate=c(mean(disp),-0.5,init_d,init_B),
            fitted = init_lam[-c(1:max.ab),], residuals = init_resid[-c(1:max.ab),])
+    if(distr=="MNB"){z=list(estimate=c(1/mean(disp),init_d,init_B),
+                            fitted = init_lam[-c(1:max.ab),], residuals = init_resid[-c(1:max.ab),])}
     class(z) = "ingarch_init"
     return(z)
   }else{
@@ -127,31 +159,19 @@ old_INGARCH_init = function(dat,model=list(past_mean=1,past_obs=1)){
       disp[p] = unname(init_val$sigmasq)
       init_lam[,p] = init_val$fitted.values
       init_resid[,p] = init_val$residuals
-      tryCatch(
-        expr = {
-          init_GIG = gamlss(dat[(3:dat_n),p]~1+log(1+dat[2:(dat_n-1),p]),family="SICHEL",control=gamlss.control(trace=FALSE))
-          init_phi[p] = max(exp(-init_GIG$sigma.coefficients),0.1)
-          init_alpha[p] = init_GIG$nu.coefficients
-        },
-        error = function(e){ 
-        }
-      )
     }
-    
-    tmp_init_d = log( (-(1+disp)+sqrt((1+disp)^2+4*disp*exp(init_d)))/(2*disp) )
-    tmp_est = c( median(init_phi,na.rm = T),median(init_alpha,na.rm = T) )
-    tmp_est = c(tmp_est,
-                optim(tmp_init_d,function(pars){old_mSichel_f(c(tmp_est,pars,init_B,init_A),dat,model)},method="BFGS")$par,
-                init_B,init_A)
-    z=list(estimate=tmp_est,
+    z=list(estimate=c(mean(disp),-0.5,init_d,init_B,init_A),
            fitted = init_lam[-c(1:max.ab),], residuals = init_resid[-c(1:max.ab),])
-    #if(distr=="Poisson"){z=list(estimate=c(init_d,init_B,init_A),
-    #                            fitted = init_lam[-c(1:max.ab),], residuals = init_resid[-c(1:max.ab),])}
+    if(distr=="MNB"){z=list(estimate=c(1/mean(disp),init_d,init_B,init_A),
+                            fitted = init_lam[-c(1:max.ab),], residuals = init_resid[-c(1:max.ab),])}
+    if(distr=="Poisson"){z=list(estimate=c(init_d,init_B,init_A),
+                                fitted = init_lam[-c(1:max.ab),], residuals = init_resid[-c(1:max.ab),])}
     class(z) = "ingarch_init"
     return(z)
   }
 }
-    
+print.ingarch_init = function(x){print(x["estimate"])}
+
     
 
 
@@ -259,51 +279,6 @@ old_mSichel_f = function(parms,dat,model){
 } 
 
 
-MPGIG_INGARCH_init = function(dat){
-  dat_n = dim(dat)[1] #the number of observation
-  dat_p = dim(dat)[2] #the dimension of multivariate time series; 
-  num_par = 2+dat_p*(2*dat_p+1) # the number of parameters.
-  
-  ##Initial values for d, A, B.
-  init_A = init_B = matrix(0,ncol=dat_p,nrow=dat_p)
-  init_d = init_lambda = rep(0,dat_p) 
-  
-  for(p in 1:dat_p){
-    ##Initial value for GARCH coefficient, 
-    init_val = tsglm(ts = dat[,p], model = list(past_obs = 1, past_mean = 1),link = "log",distr = "nbinom")
-    init_d[p] = unname(init_val$coefficients[1])
-    init_A[p,p] = unname(init_val$coefficients[3])
-    init_B[p,p] = unname(init_val$coefficients[2])
-    disp = unname(init_val$sigmasq)
-  }
-  
-  init_phi = init_alpha = rep(NA,dat_p) 
-  for(p in 1:dat_p){
-    ###Candidate initial values for phi and alpha.
-    tryCatch(
-      expr = {
-        init_GIG = gamlss(dat[(3:dat_n),p]~1+log(1+dat[2:(dat_n-1),p]),family="SICHEL",control=gamlss.control(trace=FALSE))
-        #init_GIG = gamlss(dat[(3:dat_n),p]~1,family="SICHEL",control=gamlss.control(trace=FALSE))
-        init_phi[p] = max(exp(-init_GIG$sigma.coefficients),0.1)
-        init_alpha[p] = init_GIG$nu.coefficients
-        #init_lambda[p] =  exp(init_GIG$mu.coefficients)
-      },
-      error = function(e){ 
-        
-      }
-    )
-  }
-  #tmp_est = c( max(init_phi),mean(init_alpha),  )
-  tmp_init_d = log( (-(1+disp)+sqrt((1+disp)^2+4*disp*exp(init_d)))/(2*disp) )
-  tmp_est = c( median(init_phi,na.rm = T),median(init_alpha,na.rm = T) )
-  #tmp_est = M_PGIG_INGARCH_GEM_init_d(datt,c(tmp_est,tmp_init_d,init_A,init_B))
-  tmp_est = c(tmp_est,
-              optim(tmp_init_d,function(pars){old_mSichel_f(c(tmp_est,pars,init_B,init_A),dat,model)},method="BFGS")$par,
-              init_B,init_A)
-  
-  return(tmp_est)
-}
-
 
 
 
@@ -375,7 +350,7 @@ old_GIG_Q1 = function(phi,alpha,cond_exp){  #cond_exp = c(E(Z|y),E(Z^-1|y),E(log
 old_INGARCH_EM = function(dat,init=NULL,model,tol_em = 0.001,max_iter=50, trace=F,method="BFGS"){
   
   init_val = init
-  if( is.null(init) == T ){ init_val = old_INGARCH_init(dat,model)$estimate}
+  if( is.null(init) == T ){ init_val =old_INGARCH_init(dat,model)$estimate}
   
   dat_n = dim(dat)[1] #the number of observation
   dat_p = dim(dat)[2] #the dimension of multivariate time series; 
@@ -459,23 +434,32 @@ old_ingarch_pb = function(ingarch_em,pb_n=500,burnin=500){
   pb.mean =pb.var= pb.kurtosis=pb.skew=pb.skew.nb = matrix(ncol=nrow(x$estimate$B),nrow=pb_n)
   pb.quantile1 = matrix(ncol=6,nrow=pb_n)
   pb.quantile2 = matrix(ncol=6,nrow=pb_n)  
-  for(pb in 1:pb_n){
-    pb.dat = new_mpgig_ingarch_sim(n=x$sample_size,model = x$model,phi = x$estimate$phi,alpha = x$estimate$alpha,d = x$estimate$d,B=x$estimate$B,A=x$estimate$A,burns=burnin)
-    pb.em = old_INGARCH_EM(pb.dat,init=NULL,model=x$model)
-    pb.mat[pb,] = pb.em$estimate_vector
-    pb.mean[pb,] = colMeans(pb.dat)
-    pb.var[pb,] = apply(pb.dat,2,var)
-    pb.kurtosis[pb,] = diag(kurtosis(pb.dat))
-    pb.skew[pb,] = apply(pb.dat,2,skewness)
-    pb.skew.nb[pb,] = pb.skew[pb,] - (2*pb.var[pb,]-pb.mean[pb,])/pb.mean[pb,]/sqrt(pb.var[pb,])
-    pb.quantile1[pb,] = c(summary(pb.dat[,1]))
-    pb.quantile2[pb,] = c(summary(pb.dat[,2]))
-    pb.cor[pb] = cor(pb.dat)[1,2]
-    if(pb%%10==0) print(pb)
+  
+  pb=1
+  while(pb<=pb_n){
+    tryCatch(
+      expr = {
+        pb.dat = old_mpgig_ingarch_sim(n=x$sample_size,model = x$model,phi = x$estimate$phi,alpha = x$estimate$alpha,d = x$estimate$d,B=x$estimate$B,A=x$estimate$A,burns=burnin)
+        pb.em = old_INGARCH_EM(pb.dat,model=x$model)#new_INGARCH_EM(pb.dat,init=x$estimate_vector,model=x$model)  
+        pb.cor[pb] = cor(pb.dat)[1,2]
+        pb.mat[pb,] = pb.em$estimate_vector
+        pb=pb+1
+      },
+      error = function(e){ 
+      }
+    )
+    
+    #pb.mean[pb,] = colMeans(pb.dat)
+    #pb.var[pb,] = apply(pb.dat,2,var)
+    #pb.kurtosis[pb,] = diag(kurtosis(pb.dat))
+    #pb.skew[pb,] = apply(pb.dat,2,skewness)
+    #pb.skew.nb[pb,] = pb.skew[pb,] - (2*pb.var[pb,]-pb.mean[pb,])/pb.mean[pb,]/sqrt(pb.var[pb,])
+    #pb.quantile1[pb,] = c(summary(pb.dat[,1]))
+    #pb.quantile2[pb,] = c(summary(pb.dat[,2]))
+    if(pb%%10==0) {print(pb)}
   }
   ci.mat = apply(pb.mat,2,quantile,c(0.025,0.975))
-  pb =list('95%_CI'= ci.mat, average = colMeans(pb.mat),pb.est = pb.mat,mean = pb.mean, pb.var = pb.var,pb.cor=pb.cor, pb.kurtosis = pb.kurtosis,pb.skew=pb.skew,pb.skew.nb=pb.skew.nb,quantile1 = pb.quantile1,quantile2 = pb.quantile2)
-  #pb =list(mean = pb.mean, pb.var = pb.var,pb.cor=pb.cor, pb.kurtosis = pb.kurtosis,pb.skew=pb.skew,pb.skew.nb=pb.skew.nb,quantile1 = pb.quantile1,quantile2 = pb.quantile2)
+  pb =list('95%_CI'= ci.mat, average = colMeans(pb.mat),pb.est = pb.mat,pb.cor=pb.cor)
   class(pb) = "ingarch_pb"
   return(pb)
 }
@@ -595,6 +579,67 @@ Poi_u = function(dat,ingarch_em,series){ #length(dat1)=n-max.b, length(lam)=n-ma
 
 
 
+
+
+
+
+
+####Functions for Poisson model (for comparison purpose)
+neg.q.log.lik = function(dat,pars,model){   
+  #cond_z = a vector of E(Z_t|y_t).
+  
+  max.ab = max(model[["past_obs"]])
+  lambdam = mean_process(dat,pars,model)
+  
+  result = -sum(rowSums(lambdam)) + sum(rowSums(log(lambdam)*dat[-(1:max.ab),,drop=F]))
+  return(-result)
+}
+
+
+
+
+
+
+
+
+
+
+
+###Poisson model (Fokianos, 2020.)
+new_INGARCH_Poi = function(dat,init=NULL,model,method="BFGS"){
+  
+  init_val = init
+  if( is.null(init) == T ){ init_val = new_INGARCH_init(dat,model,distr = "Poisson")$estimate}
+  
+  dat_n = dim(dat)[1] #the number of observation
+  dat_p = dim(dat)[2] #the dimension of multivariate time series; 
+  
+  bb = length(model[["past_obs"]])
+  aa = length(model[["past_mean"]])
+  max.ab = max(model[["past_obs"]])
+  tmp_dat = dat[-c(1:max.ab),]
+  
+  num_par = dat_p + (bb*dat_p^2 ) + (aa*dat_p^2 )
+  lambda = mean_process(dat,init_val,model)
+  
+  new.est = 
+    optim(init_val, function(pars){
+      neg.q.log.lik(dat,pars,model)},method=method)
+  new.est.par = new.est$par  
+  lambda = mean_process(dat,new.est.par,model)
+  if( is.null(model[["past_mean"]])==F ){ #GARCH
+    results = list(estimate_vector=new.est,par, log_QL = -new.est$value, fitted=lambda, residuals = tmp_dat-lambda, #QIC = ,
+                   estimate = list(d=new.est.par[1:dat_p],B=matrix(new.est.par[(1:(bb*dat_p^2))+dat_p],nrow=dat_p),
+                                   A=matrix(new.est.par[(1:(aa*dat_p^2))+dat_p+bb*dat_p^2],nrow=dat_p)),sample_size=dat_n, num_par = num_par ,model=model)
+  }else{ #ARCH
+    results = list(estimate_vector=new.est,par, log_QL = -new.est$value, fitted=lambda, residuals = tmp_dat-lambda, #QIC = ,
+                   estimate = list(d=new.est.par[1:dat_p],B=matrix(new.est.par[(1:(bb*dat_p^2))+dat_p],nrow=dat_p),A=NULL),
+                   sample_size=dat_n, num_par = num_par, model=model)  
+  }    
+  class(results) = "ingarch"
+  return(results)
+}
+print.ingarch = function(x){print(x[c("estimate","log_QL")])}
 
 
 

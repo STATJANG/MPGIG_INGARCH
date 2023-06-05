@@ -25,8 +25,8 @@ stored_est = matrix(0,nrow=mc_size,ncol=num_par)
      set.seed(1)
      for(simul_mc in 1:mc_size){
           #Data generation
-          datt = sim_pgig_ingarch(samplesize,phi5 = true_phi,alpha5 = true_alpha,
-                                  d5=true_d, A5 = true_A, B5 = true_B, burns = 500) 
+          datt = old_mpgig_ingarch_sim(n=samplesize,phi = true_phi,alpha = true_alpha,model=list(past_mean=1,past_obs=1),
+                                  d=true_d, A = true_A, B = true_B, burns = 500) 
           #Parameter estimation
           tmp_val = old_INGARCH_EM(datt,model=list(past_mean=1,past_obs=1),trace=T)
           
