@@ -1,6 +1,6 @@
 ####REAL DATA ANALYSIS####
 ##Data Extraction
-load("MPGIG_INGARCH_FN (git).R")
+source("MPGIG_INGARCH_FN (git).R")
 datt = read.csv("Cannabis_example.csv")
 datt = as.matrix(datt[,-1])
 
