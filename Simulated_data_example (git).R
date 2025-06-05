@@ -1,5 +1,5 @@
 ###Simulation Setting
-load("MPGIG_INGARCH_FN (git).R")
+source("MPGIG_INGARCH_FN (git).R")
 samplesize=1000 ; mc_size = 500 #Repetition size. 
 
 #True parameters
